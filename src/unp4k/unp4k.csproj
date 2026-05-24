@@ -6,7 +6,6 @@
 		<PlatformTarget>AnyCPU</PlatformTarget>
 		<RuntimeIdentifier>win-x64</RuntimeIdentifier>
 		<OutputType>Exe</OutputType>
-    <StartupObject>unp4k.Program</StartupObject>
   </PropertyGroup>
 
 	<PropertyGroup Condition="'$(Configuration)'=='Debug'">
