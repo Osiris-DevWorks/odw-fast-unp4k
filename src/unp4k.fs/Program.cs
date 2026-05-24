@@ -85,7 +85,7 @@ namespace unp4k.fs
 
 					do
 					{
-						var blank = new string(' ', Console.WindowWidth);
+						var blank = new string(' ', GetConsoleWidth());
 						Console.CursorVisible = false;
 
 						Console.SetCursorPosition(0, 0);
@@ -166,6 +166,12 @@ namespace unp4k.fs
 			{
 				if (cleanupWorkspaceDirectory) Directory.Delete(workspaceDirectory);
 			}
+		}
+
+		private static int GetConsoleWidth()
+		{
+			try { return Console.WindowWidth; }
+			catch (IOException) { return 80; }
 		}
 
 		private static VirtualFileSystem GetFileSystem(string filePath)
