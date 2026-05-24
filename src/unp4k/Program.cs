@@ -3,7 +3,6 @@ using ICSharpCode.SharpZipLib.Zip;
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -11,13 +10,6 @@ namespace unp4k
 {
 	class Program
 	{
-		private static readonly HttpClient _httpClient = new HttpClient();
-
-		static Program()
-		{
-			_httpClient.DefaultRequestHeaders.TryAddWithoutValidation("client", "unp4k");
-		}
-
 		static void Main(string[] args)
 		{
 			var key = new Byte[] { 0x5E, 0x7A, 0x20, 0x02, 0x30, 0x2E, 0xEB, 0x1A, 0x3B, 0xB6, 0x17, 0xC3, 0x0F, 0xDE, 0x1E, 0x47 };
@@ -84,33 +76,11 @@ namespace unp4k
 					catch (Exception ex)
 					{
 						Console.WriteLine($"Exception while extracting {info.Name}: {ex.Message}");
-						ReportError(info.Name, ex);
 					}
 					return localPak;
 				},
 				localPak => ((IDisposable)localPak).Dispose()
 			);
-		}
-
-		private static void ReportError(string entryName, Exception ex)
-		{
-			try
-			{
-				var server = "https://herald.holoxplor.space";
-				using (var content = new MultipartFormDataContent("UPLOAD----"))
-				{
-					content.Add(new StringContent($"{ex.Message}\r\n\r\n{ex.StackTrace}"), "exception", entryName);
-					using (var response = _httpClient.PostAsync($"{server}/p4k/exception/{entryName}", content).Result)
-					{
-						if (response.StatusCode == System.Net.HttpStatusCode.OK)
-							Console.WriteLine("This exception has been reported.");
-					}
-				}
-			}
-			catch (Exception)
-			{
-				Console.WriteLine("There was a problem whilst attempting to report this error.");
-			}
 		}
 	}
 }
