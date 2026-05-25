@@ -596,6 +596,7 @@ namespace unforge
 			var xml = new XmlDocument();
 			return this.ReadRecordAtIndexAsXml(xml, recordIndex);
 		}
+        return this.ReadRecordAtIndexAsXml(xml, recordIndex);
 
 		public XmlElement ReadRecordByReferenceAsXml(XmlNode xmlNode, Guid reference)
 		{
