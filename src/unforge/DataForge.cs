@@ -594,9 +594,10 @@ namespace unforge
 			if (!this.PathToRecordMap.TryGetValue(path, out var recordIndex)) throw new FileNotFoundException();
 
 			var xml = new XmlDocument();
-			return this.ReadRecordAtIndexAsXml(xml, recordIndex);
+			return this.Fork().ReadRecordAtIndexAsXml(xml, recordIndex);
 		}
-        return this.ReadRecordAtIndexAsXml(xml, recordIndex);
+        
+		
 
 		public XmlElement ReadRecordByReferenceAsXml(XmlNode xmlNode, Guid reference)
 		{
