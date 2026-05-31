@@ -65,7 +65,9 @@ namespace sc.gamedata
 
 		// Missile-only fields.
 		public Double? lock_time { get; set; }
+		public Double? lock_range_min { get; set; }
 		public Double? lock_range_max { get; set; }
+		public Double? arm_time { get; set; }
 		public Double? health { get; set; }
 		public String? missile_subtype { get; set; }
 

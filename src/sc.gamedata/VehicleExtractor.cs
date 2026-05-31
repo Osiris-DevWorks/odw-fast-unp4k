@@ -39,7 +39,11 @@ namespace sc.gamedata
 			RegexOptions.Compiled);
 
 		private static readonly Regex ClassRe = new(@"class[_]?(\d+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-		private static readonly Regex MissileAttachRe = new(@"^missile +0*(\d+)( +attach)?$",
+		// Tube-index port names within a rack — normalized to "#N" so all tubes of
+		// one launcher share a label prefix and collapse into a single rack slot.
+		// Handles both orderings CIG ships use: "missile 01" / "missile 01 attach"
+		// and "missile attach 01" (Constellations, Polaris, Ares, Idris, etc.).
+		private static readonly Regex MissileAttachRe = new(@"^missile +(?:attach +)?0*(\d+)( +attach)?$",
 			RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
 		public static List<VehicleRecord> Extract(
@@ -102,7 +106,7 @@ namespace sc.gamedata
 				// filtered automatically.
 				var slots = new List<SlotRecord>();
 				var seenChains = new HashSet<String>();
-				foreach (var (chain, weapon) in WalkForWeapons(topLoadout, new List<String>(), weaponByGuid, weaponById))
+				foreach (var (chain, weapon, parentClassName) in WalkForWeapons(topLoadout, new List<String>(), null, weaponByGuid, weaponById))
 				{
 					var chainKey = String.Join('/', chain);
 					if (!seenChains.Add(chainKey)) continue;
@@ -113,6 +117,10 @@ namespace sc.gamedata
 						size = size,
 						kind = weapon.kind,
 						stock_weapon_id = weapon.id,
+						// For missiles, the immediate loadout parent is the rack item.
+						// Reconciled against the racks catalog in Program.cs; non-rack
+						// parents (direct-mounted pylons) are nulled out there.
+						stock_rack_id = weapon.kind == "missile" ? parentClassName : null,
 					});
 				}
 
@@ -260,9 +268,10 @@ namespace sc.gamedata
 			}
 		}
 
-		private static IEnumerable<(List<String> chain, WeaponRecord weapon)> WalkForWeapons(
+		private static IEnumerable<(List<String> chain, WeaponRecord weapon, String? parentClassName)> WalkForWeapons(
 			XmlElement loadoutElem,
 			List<String> chain,
+			String? parentClassName,
 			IReadOnlyDictionary<String, WeaponRecord> weaponByGuid,
 			IReadOnlyDictionary<String, WeaponRecord> weaponById)
 		{
@@ -281,10 +290,19 @@ namespace sc.gamedata
 				foreach (XmlNode c in entry.ChildNodes)
 					if (c is XmlElement e && e.LocalName == "loadout") { nested = e; break; }
 				if (nested != null)
-					foreach (var pair in WalkForWeapons(nested, newChain, weaponByGuid, weaponById))
+				{
+					// A missile's immediate loadout container is the rack item (MRCK_*),
+					// walked through here but never yielded (it isn't a weapon). Pass its
+					// identity down as the parent — class name when present, else a
+					// `guid:<__ref>` marker so Program.cs can resolve GUID-referenced
+					// racks against the catalog.
+					var containerId = !String.IsNullOrEmpty(cn) ? cn
+						: (!String.IsNullOrEmpty(refGuid) ? "guid:" + refGuid : null);
+					foreach (var pair in WalkForWeapons(nested, newChain, containerId, weaponByGuid, weaponById))
 						yield return pair;
+				}
 
-				if (weapon != null) yield return (newChain, weapon);
+				if (weapon != null) yield return (newChain, weapon, parentClassName);
 			}
 		}
 
@@ -326,13 +344,24 @@ namespace sc.gamedata
 			return cleaned.Count > 0 ? String.Join(" > ", cleaned) : (chain.Count > 0 ? chain[^1] : "");
 		}
 
-		// Group consecutive missile slots that share a rack-prefix label into
-		// one missile_rack entry. Slot labels at this point look like
-		// `left bay door > #1`, `left bay door > #2`, … — we strip the
-		// `> #N` suffix and collapse runs that share the same prefix.
+		// Group consecutive missile slots belonging to the same physical rack into
+		// one missile_rack entry. A tube label looks like `<rack hardpoint> > <tube>`
+		// — `left bay door > #1`, `missilelauncher left > missile 1 attach left`,
+		// `missilelauncher > torpedo tray 1 attach node`, … — so we strip the final
+		// `> tube` segment (whatever its shape) and collapse a run that shares both
+		// the resulting prefix and the same parent rack id. Keying on the rack id as
+		// well as the prefix keeps two same-model racks on distinct hardpoints from
+		// merging, and means every tube of one launcher folds into a single slot.
+		private static readonly Regex TubeSuffixRe = new(@"^(.+)>\s*[^>]+$", RegexOptions.Compiled);
+
+		private static String RackPrefix(String label)
+		{
+			var m = TubeSuffixRe.Match(label);
+			return m.Success ? m.Groups[1].Value.Trim() : label;
+		}
+
 		private static List<SlotRecord> CollapseMissileRacks(List<SlotRecord> slots)
 		{
-			var rackSuffix = new Regex(@"^(.+?)\s*>\s*#\d+$", RegexOptions.Compiled);
 			var result = new List<SlotRecord>();
 			var i = 0;
 			while (i < slots.Count)
@@ -344,15 +373,13 @@ namespace sc.gamedata
 					i++;
 					continue;
 				}
-				var m = rackSuffix.Match(slot.label);
-				var prefix = m.Success ? m.Groups[1].Value.Trim() : slot.label;
+				var prefix = RackPrefix(slot.label);
+				var rackId = slot.stock_rack_id;
 				var rackMembers = new List<SlotRecord>();
 				var j = i;
-				while (j < slots.Count && slots[j].kind == "missile")
+				while (j < slots.Count && slots[j].kind == "missile"
+					&& RackPrefix(slots[j].label) == prefix && slots[j].stock_rack_id == rackId)
 				{
-					var jm = rackSuffix.Match(slots[j].label);
-					var jp = jm.Success ? jm.Groups[1].Value.Trim() : slots[j].label;
-					if (jp != prefix) break;
 					rackMembers.Add(slots[j]);
 					j++;
 				}
@@ -363,6 +390,7 @@ namespace sc.gamedata
 					min_size = rackMembers.Min(s => s.size),
 					max_size = rackMembers.Max(s => s.size),
 					size = rackMembers[0].size,
+					stock_rack_id = rackId,
 					stock_missile_ids = rackMembers.Select(s => s.stock_weapon_id).ToList(),
 				});
 				i = j;
