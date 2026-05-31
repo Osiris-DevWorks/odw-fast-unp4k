@@ -102,7 +102,7 @@ namespace sc.gamedata
 				// filtered automatically.
 				var slots = new List<SlotRecord>();
 				var seenChains = new HashSet<String>();
-				foreach (var (chain, weapon) in WalkForWeapons(topLoadout, new List<String>(), weaponByGuid, weaponById))
+				foreach (var (chain, weapon, parentClassName) in WalkForWeapons(topLoadout, new List<String>(), null, weaponByGuid, weaponById))
 				{
 					var chainKey = String.Join('/', chain);
 					if (!seenChains.Add(chainKey)) continue;
@@ -113,6 +113,10 @@ namespace sc.gamedata
 						size = size,
 						kind = weapon.kind,
 						stock_weapon_id = weapon.id,
+						// For missiles, the immediate loadout parent is the rack item.
+						// Reconciled against the racks catalog in Program.cs; non-rack
+						// parents (direct-mounted pylons) are nulled out there.
+						stock_rack_id = weapon.kind == "missile" ? parentClassName : null,
 					});
 				}
 
@@ -260,9 +264,10 @@ namespace sc.gamedata
 			}
 		}
 
-		private static IEnumerable<(List<String> chain, WeaponRecord weapon)> WalkForWeapons(
+		private static IEnumerable<(List<String> chain, WeaponRecord weapon, String? parentClassName)> WalkForWeapons(
 			XmlElement loadoutElem,
 			List<String> chain,
+			String? parentClassName,
 			IReadOnlyDictionary<String, WeaponRecord> weaponByGuid,
 			IReadOnlyDictionary<String, WeaponRecord> weaponById)
 		{
@@ -281,10 +286,19 @@ namespace sc.gamedata
 				foreach (XmlNode c in entry.ChildNodes)
 					if (c is XmlElement e && e.LocalName == "loadout") { nested = e; break; }
 				if (nested != null)
-					foreach (var pair in WalkForWeapons(nested, newChain, weaponByGuid, weaponById))
+				{
+					// A missile's immediate loadout container is the rack item (MRCK_*),
+					// walked through here but never yielded (it isn't a weapon). Pass its
+					// identity down as the parent — class name when present, else a
+					// `guid:<__ref>` marker so Program.cs can resolve GUID-referenced
+					// racks against the catalog.
+					var containerId = !String.IsNullOrEmpty(cn) ? cn
+						: (!String.IsNullOrEmpty(refGuid) ? "guid:" + refGuid : null);
+					foreach (var pair in WalkForWeapons(nested, newChain, containerId, weaponByGuid, weaponById))
 						yield return pair;
+				}
 
-				if (weapon != null) yield return (newChain, weapon);
+				if (weapon != null) yield return (newChain, weapon, parentClassName);
 			}
 		}
 
@@ -356,6 +370,12 @@ namespace sc.gamedata
 					rackMembers.Add(slots[j]);
 					j++;
 				}
+				var rackId = rackMembers[0].stock_rack_id;
+				// A label-prefix group should map to one physical rack. If members
+				// disagree, the prefix collapse merged two racks and rackMembers[0]
+				// would be silently wrong — surface it rather than hide it.
+				if (rackMembers.Any(s => s.stock_rack_id != rackId))
+					Console.Error.WriteLine($"[rack] label group '{prefix}' spans multiple rack ids; using {rackId}");
 				result.Add(new SlotRecord
 				{
 					label = prefix,
@@ -363,6 +383,7 @@ namespace sc.gamedata
 					min_size = rackMembers.Min(s => s.size),
 					max_size = rackMembers.Max(s => s.size),
 					size = rackMembers[0].size,
+					stock_rack_id = rackId,
 					stock_missile_ids = rackMembers.Select(s => s.stock_weapon_id).ToList(),
 				});
 				i = j;

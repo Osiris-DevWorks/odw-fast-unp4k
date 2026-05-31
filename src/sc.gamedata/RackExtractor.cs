@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using System.Xml;
 using unforge;
@@ -27,6 +28,7 @@ namespace sc.gamedata
 				var root = df.ReadRecordByPathAsXml(path);
 				if (root == null) continue;
 				var entityId = XmlHelpers.EntityIdFromRoot(root);
+				var rackGuid = XmlHelpers.Attr(root, "__ref");
 
 				// Bail unless AttachDef declares this is in fact a missile-rack
 				// item — the folder also contains some peripheral entities.
@@ -87,6 +89,7 @@ namespace sc.gamedata
 				result.Add(new RackRecord
 				{
 					id = entityId,
+					_guid = rackGuid,
 					name = name,
 					size = size,
 					missile_size = missileSize ?? 0,
@@ -109,6 +112,10 @@ namespace sc.gamedata
 	internal sealed class RackRecord
 	{
 		public String id { get; set; } = "";
+		// DataForge record GUID (__ref). Used to resolve GUID-referenced racks in
+		// vehicle loadouts; stripped from JSON output via [JsonIgnore].
+		[JsonIgnore]
+		public String? _guid { get; set; }
 		public String name { get; set; } = "";
 		public Int32 size { get; set; }
 		public Int32 missile_size { get; set; }

@@ -103,6 +103,40 @@ namespace sc.gamedata
 			var racks = RackExtractor.Extract(df, loc);
 			Console.WriteLine($"Missile racks: {racks.Count}");
 
+			// Reconcile each missile bay's stock_rack_id (the loadout-parent class
+			// captured in VehicleExtractor) against the racks catalog. Drop any that
+			// don't resolve: a directly-mounted missile pylon's parent isn't a rack,
+			// and the frontend can only use ids that exist in `racks`.
+			{
+				var rackIds = new HashSet<String>(racks.Select(r => r.id), StringComparer.Ordinal);
+				var rackByGuid = racks
+					.Where(r => !String.IsNullOrEmpty(r._guid))
+					.GroupBy(r => r._guid!, StringComparer.OrdinalIgnoreCase)
+					.ToDictionary(grp => grp.Key, grp => grp.First().id, StringComparer.OrdinalIgnoreCase);
+				int rackSlots = 0, captured = 0, byClass = 0, byGuid = 0;
+				foreach (var v in vehicles)
+					foreach (var s in v.slots)
+					{
+						if (s.kind != "missile_rack") continue;
+						rackSlots++;
+						var raw = s.stock_rack_id;
+						if (String.IsNullOrEmpty(raw)) continue;
+						captured++;
+						if (raw.StartsWith("guid:", StringComparison.Ordinal))
+						{
+							// GUID-referenced rack: resolve against the catalog by __ref.
+							var guid = raw.Substring("guid:".Length);
+							if (rackByGuid.TryGetValue(guid, out var idFromGuid)) { s.stock_rack_id = idFromGuid; byGuid++; }
+							else s.stock_rack_id = null;
+						}
+						else if (rackIds.Contains(raw)) byClass++;   // class-name referenced
+						else s.stock_rack_id = null;                  // non-rack parent (direct-mount pylon)
+					}
+				int resolved = byClass + byGuid;
+				Console.WriteLine($"Missile-rack ids: {resolved}/{rackSlots} resolved "
+					+ $"({byClass} by class, {byGuid} by guid; captured {captured}, dropped {captured - resolved} unresolved)");
+			}
+
 			extractSw.Stop();
 			Console.WriteLine($"Extraction: {extractSw.Elapsed.TotalSeconds:F2}s");
 
