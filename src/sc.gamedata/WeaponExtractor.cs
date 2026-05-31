@@ -270,21 +270,25 @@ namespace sc.gamedata
 			var fallback = NameResolver.PrettifyEntityId(entityId, "");
 			var name = NameResolver.Resolve(locKey, loc, fallback, entityId);
 
-			// Targeting params (lock_time, lock_range_max) live under
-			// SCItemMissileParams/Targeting; speed and range are GCS.LinearSpeed
-			// and Distance respectively.
-			Double? lockTime = null;
-			Double? lockRange = null;
-			var targeting = XmlNav.FindFirst(missileParams, "Targeting");
+			// Lock + engagement-range params live under SCItemMissileParams/
+			// targetingParams (lockTime, lockRangeMin, lockRangeMax). Cruise speed
+			// is GCSParams/linearSpeed; the bay has no explicit range attr, so max
+			// travel ≈ cruise speed × maxLifetime (same speed×lifetime model as guns).
+			Double? lockTime = null, lockRangeMin = null, lockRangeMax = null;
+			var targeting = XmlNav.FindFirst(missileParams, "targetingParams");
 			if (targeting != null)
 			{
-				lockTime = XmlHelpers.AttrDoubleNullable(targeting, "LockTime");
-				lockRange = XmlHelpers.AttrDoubleNullable(targeting, "LockRangeMax");
+				lockTime = XmlHelpers.AttrDoubleNullable(targeting, "lockTime");
+				lockRangeMin = XmlHelpers.AttrDoubleNullable(targeting, "lockRangeMin");
+				lockRangeMax = XmlHelpers.AttrDoubleNullable(targeting, "lockRangeMax");
 			}
 			Double? linearSpeed = null;
-			var gcs = XmlNav.FindFirst(missileParams, "GCS");
-			if (gcs != null) linearSpeed = XmlHelpers.AttrDoubleNullable(gcs, "LinearSpeed");
-			var distance = XmlHelpers.AttrDoubleNullable(missileParams, "Distance");
+			var gcs = XmlNav.FindFirst(missileParams, "GCSParams");
+			if (gcs != null) linearSpeed = XmlHelpers.AttrDoubleNullable(gcs, "linearSpeed");
+			var armTime = XmlHelpers.AttrDoubleNullable(missileParams, "armTime");
+			var maxLifetime = XmlHelpers.AttrDoubleNullable(missileParams, "maxLifetime");
+			Double? distance = (linearSpeed is > 0 && maxLifetime is > 0)
+				? linearSpeed!.Value * maxLifetime!.Value : (Double?)null;
 
 			Double? hp = null;
 			var durability = XmlNav.FindFirst(root, "Durability");
@@ -313,7 +317,9 @@ namespace sc.gamedata
 				projectile_velocity = XmlHelpers.Round(linearSpeed, 0),
 				range = XmlHelpers.Round(distance, 0),
 				lock_time = XmlHelpers.Round(lockTime, 2),
-				lock_range_max = XmlHelpers.Round(lockRange, 0),
+				lock_range_min = XmlHelpers.Round(lockRangeMin, 0),
+				lock_range_max = XmlHelpers.Round(lockRangeMax, 0),
+				arm_time = XmlHelpers.Round(armTime, 2),
 				health = XmlHelpers.Round(hp, 0),
 				missile_subtype = subType,
 				_guid = missileGuid,
