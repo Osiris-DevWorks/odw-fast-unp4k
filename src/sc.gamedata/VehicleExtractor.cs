@@ -39,7 +39,11 @@ namespace sc.gamedata
 			RegexOptions.Compiled);
 
 		private static readonly Regex ClassRe = new(@"class[_]?(\d+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-		private static readonly Regex MissileAttachRe = new(@"^missile +0*(\d+)( +attach)?$",
+		// Tube-index port names within a rack — normalized to "#N" so all tubes of
+		// one launcher share a label prefix and collapse into a single rack slot.
+		// Handles both orderings CIG ships use: "missile 01" / "missile 01 attach"
+		// and "missile attach 01" (Constellations, Polaris, Ares, Idris, etc.).
+		private static readonly Regex MissileAttachRe = new(@"^missile +(?:attach +)?0*(\d+)( +attach)?$",
 			RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
 		public static List<VehicleRecord> Extract(
@@ -340,13 +344,24 @@ namespace sc.gamedata
 			return cleaned.Count > 0 ? String.Join(" > ", cleaned) : (chain.Count > 0 ? chain[^1] : "");
 		}
 
-		// Group consecutive missile slots that share a rack-prefix label into
-		// one missile_rack entry. Slot labels at this point look like
-		// `left bay door > #1`, `left bay door > #2`, … — we strip the
-		// `> #N` suffix and collapse runs that share the same prefix.
+		// Group consecutive missile slots belonging to the same physical rack into
+		// one missile_rack entry. A tube label looks like `<rack hardpoint> > <tube>`
+		// — `left bay door > #1`, `missilelauncher left > missile 1 attach left`,
+		// `missilelauncher > torpedo tray 1 attach node`, … — so we strip the final
+		// `> tube` segment (whatever its shape) and collapse a run that shares both
+		// the resulting prefix and the same parent rack id. Keying on the rack id as
+		// well as the prefix keeps two same-model racks on distinct hardpoints from
+		// merging, and means every tube of one launcher folds into a single slot.
+		private static readonly Regex TubeSuffixRe = new(@"^(.+)>\s*[^>]+$", RegexOptions.Compiled);
+
+		private static String RackPrefix(String label)
+		{
+			var m = TubeSuffixRe.Match(label);
+			return m.Success ? m.Groups[1].Value.Trim() : label;
+		}
+
 		private static List<SlotRecord> CollapseMissileRacks(List<SlotRecord> slots)
 		{
-			var rackSuffix = new Regex(@"^(.+?)\s*>\s*#\d+$", RegexOptions.Compiled);
 			var result = new List<SlotRecord>();
 			var i = 0;
 			while (i < slots.Count)
@@ -358,24 +373,16 @@ namespace sc.gamedata
 					i++;
 					continue;
 				}
-				var m = rackSuffix.Match(slot.label);
-				var prefix = m.Success ? m.Groups[1].Value.Trim() : slot.label;
+				var prefix = RackPrefix(slot.label);
+				var rackId = slot.stock_rack_id;
 				var rackMembers = new List<SlotRecord>();
 				var j = i;
-				while (j < slots.Count && slots[j].kind == "missile")
+				while (j < slots.Count && slots[j].kind == "missile"
+					&& RackPrefix(slots[j].label) == prefix && slots[j].stock_rack_id == rackId)
 				{
-					var jm = rackSuffix.Match(slots[j].label);
-					var jp = jm.Success ? jm.Groups[1].Value.Trim() : slots[j].label;
-					if (jp != prefix) break;
 					rackMembers.Add(slots[j]);
 					j++;
 				}
-				var rackId = rackMembers[0].stock_rack_id;
-				// A label-prefix group should map to one physical rack. If members
-				// disagree, the prefix collapse merged two racks and rackMembers[0]
-				// would be silently wrong — surface it rather than hide it.
-				if (rackMembers.Any(s => s.stock_rack_id != rackId))
-					Console.Error.WriteLine($"[rack] label group '{prefix}' spans multiple rack ids; using {rackId}");
 				result.Add(new SlotRecord
 				{
 					label = prefix,
