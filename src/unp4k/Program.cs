@@ -3,20 +3,13 @@ using ICSharpCode.SharpZipLib.Zip;
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace unp4k
 {
 	class Program
 	{
-		private static readonly HttpClient _httpClient = new HttpClient();
-
-		static Program()
-		{
-			_httpClient.DefaultRequestHeaders.TryAddWithoutValidation("client", "unp4k");
-		}
-
 		static void Main(string[] args)
 		{
 			var key = new Byte[] { 0x5E, 0x7A, 0x20, 0x02, 0x30, 0x2E, 0xEB, 0x1A, 0x3B, 0xB6, 0x17, 0xC3, 0x0F, 0xDE, 0x1E, 0x47 };
@@ -31,6 +24,7 @@ namespace unp4k
 			var p4kPath = Path.GetFullPath(args[0]);
 
 			// Phase 1: single sequential pass to collect matching entries
+			Console.WriteLine($"Scanning {Path.GetFileName(p4kPath)}...");
 			var matching = new List<(long Index, string Name, string Compression, string Crypto)>();
 			using (var pakFile = File.OpenRead(p4kPath))
 			{
@@ -51,8 +45,11 @@ namespace unp4k
 					}
 				}
 			}
+			Console.WriteLine($"Found {matching.Count} files to extract.");
 
 			// Phase 2: parallel extraction; each thread owns its own ZipFile + FileStream
+			var extractCount = 0;
+			var total = matching.Count;
 			Parallel.ForEach(
 				matching,
 				new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount },
@@ -64,44 +61,26 @@ namespace unp4k
 						var dir = Path.GetDirectoryName(info.Name);
 						if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
 
-						Console.WriteLine($"{info.Compression} | {info.Crypto} | {info.Name}");
-
 						using (var s = localPak.GetInputStream(info.Index))
 						using (var fs = File.Create(info.Name))
 						{
 							StreamUtils.Copy(s, fs, new byte[81920]);
 						}
+
+						// Print every 100th file to avoid Console lock contention
+						// at high throughput; always print the last one.
+						var n = Interlocked.Increment(ref extractCount);
+						if (n % 100 == 0 || n == total)
+							Console.WriteLine($"[{n}/{total}] {info.Compression} | {info.Crypto} | {info.Name}");
 					}
 					catch (Exception ex)
 					{
 						Console.WriteLine($"Exception while extracting {info.Name}: {ex.Message}");
-						ReportError(info.Name, ex);
 					}
 					return localPak;
 				},
 				localPak => ((IDisposable)localPak).Dispose()
 			);
-		}
-
-		private static void ReportError(string entryName, Exception ex)
-		{
-			try
-			{
-				var server = "https://herald.holoxplor.space";
-				using (var content = new MultipartFormDataContent("UPLOAD----"))
-				{
-					content.Add(new StringContent($"{ex.Message}\r\n\r\n{ex.StackTrace}"), "exception", entryName);
-					using (var response = _httpClient.PostAsync($"{server}/p4k/exception/{entryName}", content).Result)
-					{
-						if (response.StatusCode == System.Net.HttpStatusCode.OK)
-							Console.WriteLine("This exception has been reported.");
-					}
-				}
-			}
-			catch (Exception)
-			{
-				Console.WriteLine("There was a problem whilst attempting to report this error.");
-			}
 		}
 	}
 }

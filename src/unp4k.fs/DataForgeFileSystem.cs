@@ -43,7 +43,10 @@ namespace unp4k.fs
 
 							GetContent = () =>
 							{
-								var node = dataForge.ReadRecordByPathAsXml(path);
+								// Fork gives each Dokan callback its own stream position
+								// and recursion stacks — no shared lock needed.
+								using var fork = dataForge.Fork();
+								var node = fork.ReadRecordByPathAsXml(path);
 
 								using (var ms = new MemoryStream())
 								using (var writer = XmlWriter.Create(ms, _xmlSettings))

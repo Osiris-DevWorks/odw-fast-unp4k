@@ -256,5 +256,8 @@ paket-files/
 .fake
 .ionide
 
-.fake
-.ionide
+# Local build output dropped in repo root
+/*.exe
+
+# Ignore claude settings
+.claude/settings.local.json

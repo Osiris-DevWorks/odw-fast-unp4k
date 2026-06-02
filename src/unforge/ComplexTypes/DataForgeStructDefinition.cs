@@ -169,12 +169,6 @@ namespace unforge
 							var dataStruct = this.StreamReader.ReadStructDefinitionAtIndex(pointer.StructIndex);
 
 							return parentNode.CreateElementWithValue(nameOverride ?? propertyDefinition.Name, String.Format("{1}[{2:X4}]", propertyDefinition.DataType, dataStruct.Name, pointer.VariantIndex, pointer.Padding));
-
-							var result = this.StreamReader.ReadStructAtIndexAsXml(parentNode.OwnerDocument.CreateElement(dataStruct.Name), pointer.StructIndex, pointer.VariantIndex);
-
-							if (result != null) return parentNode.CreateElementWithValue(nameOverride ?? propertyDefinition.Name, result);
-
-							return null;
 						}
 					case EDataType.varLocale:
 						{

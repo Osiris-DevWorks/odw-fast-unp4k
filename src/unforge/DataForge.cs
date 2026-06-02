@@ -105,6 +105,92 @@ namespace unforge
 			return ms;
 		}
 
+		// Fork constructor: shares all pre-loaded read-only state with the source
+		// but wraps the same byte buffer in a new MemoryStream so each fork has its
+		// own stream position, RecordStack, and StructStack.  Zero heap allocation
+		// beyond the MemoryStream header and the two small guard sets.
+		private DataForge(DataForge src, MemoryStream ownStream) : base(ownStream)
+		{
+			this.IsLegacy = src.IsLegacy;
+			this.FileVersion = src.FileVersion;
+
+			this.StructDefinitionCount  = src.StructDefinitionCount;
+			this.PropertyDefinitionCount = src.PropertyDefinitionCount;
+			this.EnumDefinitionCount    = src.EnumDefinitionCount;
+			this.DataMappingCount       = src.DataMappingCount;
+			this.RecordDefinitionCount  = src.RecordDefinitionCount;
+
+			this.BooleanValueCount   = src.BooleanValueCount;
+			this.Int8ValueCount      = src.Int8ValueCount;
+			this.Int16ValueCount     = src.Int16ValueCount;
+			this.Int32ValueCount     = src.Int32ValueCount;
+			this.Int64ValueCount     = src.Int64ValueCount;
+			this.UInt8ValueCount     = src.UInt8ValueCount;
+			this.UInt16ValueCount    = src.UInt16ValueCount;
+			this.UInt32ValueCount    = src.UInt32ValueCount;
+			this.UInt64ValueCount    = src.UInt64ValueCount;
+			this.SingleValueCount    = src.SingleValueCount;
+			this.DoubleValueCount    = src.DoubleValueCount;
+			this.GuidValueCount      = src.GuidValueCount;
+			this.StringValueCount    = src.StringValueCount;
+			this.LocaleValueCount    = src.LocaleValueCount;
+			this.EnumValueCount      = src.EnumValueCount;
+			this.StrongValueCount    = src.StrongValueCount;
+			this.WeakValueCount      = src.WeakValueCount;
+			this.ReferenceValueCount = src.ReferenceValueCount;
+			this.EnumOptionCount     = src.EnumOptionCount;
+			this.TextLength          = src.TextLength;
+			this.BlobLength          = src.BlobLength;
+
+			// Shared read-only lookup tables (built once in the primary constructor)
+			this.PathToRecordMap      = src.PathToRecordMap;
+			this.ReferenceToRecordMap = src.ReferenceToRecordMap;
+			this.StructToDataOffsetMap = src.StructToDataOffsetMap;
+			this._cachedDataOffset    = src._cachedDataOffset;
+
+			// Shared pre-loaded string buffers and value arrays (all read-only after ctor)
+			this._textBuffer          = src._textBuffer;
+			this._blobBuffer          = src._blobBuffer;
+			this._structDefinitions   = src._structDefinitions;
+			this._propertyDefinitions = src._propertyDefinitions;
+			this._enumDefinitions     = src._enumDefinitions;
+			this._dataMappings        = src._dataMappings;
+			this._recordDefinitions   = src._recordDefinitions;
+			this._booleanValues       = src._booleanValues;
+			this._int8Values          = src._int8Values;
+			this._int16Values         = src._int16Values;
+			this._int32Values         = src._int32Values;
+			this._int64Values         = src._int64Values;
+			this._uint8Values         = src._uint8Values;
+			this._uint16Values        = src._uint16Values;
+			this._uint32Values        = src._uint32Values;
+			this._uint64Values        = src._uint64Values;
+			this._singleValues        = src._singleValues;
+			this._doubleValues        = src._doubleValues;
+			this._guidValues          = src._guidValues;
+			this._stringValues        = src._stringValues;
+			this._localeValues        = src._localeValues;
+			this._enumValues          = src._enumValues;
+			this._strongPointerValues = src._strongPointerValues;
+			this._weakPointerValues   = src._weakPointerValues;
+			this._referenceValues     = src._referenceValues;
+			this._enumOptions         = src._enumOptions;
+
+			// Own recursion-guard stacks — not shared between forks
+			this.RecordStack = new HashSet<Int32>();
+			this.StructStack = new HashSet<(UInt32, UInt32)>();
+		}
+
+		// Creates a zero-copy fork: new stream position + recursion stacks,
+		// everything else shared by reference.  Cheap enough to call per-thread
+		// (in Save) or per Dokan callback (in unp4k.fs).
+		public DataForge Fork()
+		{
+			var buf = ((MemoryStream)this.BaseStream).GetBuffer();
+			var len = (Int32)this.BaseStream.Length;
+			return new DataForge(this, new MemoryStream(buf, 0, len, writable: false));
+		}
+
 		public DataForge(Stream stream) : base(WrapInMemoryStream(stream))
 		{
 			this.BaseStream.Seek(0, SeekOrigin.Begin);
@@ -152,8 +238,8 @@ namespace unforge
 			this.TextLength = this.ReadUInt32();
 			this.BlobLength = this.IsLegacy ? 0 : this.ReadUInt32();
 
-			this.PathToRecordMap = new Dictionary<String, Int32> { };
-			this.ReferenceToRecordMap = new Dictionary<Guid, Int32> { };
+			this.PathToRecordMap      = new Dictionary<String, Int32>(this.RecordDefinitionCount);
+			this.ReferenceToRecordMap = new Dictionary<Guid,   Int32>(this.RecordDefinitionCount);
 
 			// this.ReportOffsets();
 
@@ -173,7 +259,7 @@ namespace unforge
 
 			var lastOffset = 0;
 
-			this.StructToDataOffsetMap = new Dictionary<UInt32, Int64> { };
+			this.StructToDataOffsetMap = new Dictionary<UInt32, Int64>(this.DataMappingCount);
 			for (Int32 dataMappingIndex = 0; dataMappingIndex < this.DataMappingCount; dataMappingIndex++)
 			{
 				var dataMapping = this._dataMappings[dataMappingIndex];
@@ -508,12 +594,10 @@ namespace unforge
 			if (!this.PathToRecordMap.TryGetValue(path, out var recordIndex)) throw new FileNotFoundException();
 
 			var xml = new XmlDocument();
-
-			lock (this.BaseStream)
-			{
-				return this.ReadRecordAtIndexAsXml(xml, recordIndex);
-			}
+			return this.Fork().ReadRecordAtIndexAsXml(xml, recordIndex);
 		}
+        
+		
 
 		public XmlElement ReadRecordByReferenceAsXml(XmlNode xmlNode, Guid reference)
 		{
@@ -602,19 +686,24 @@ namespace unforge
 			var skipped = 0;
 			Int64 bytesWritten = 0;
 
-			// Reads are serialized by the lock inside ReadRecordByPathAsXml;
-			// writes are independent so they run in parallel across all cores.
+			// Track directories already created to avoid redundant syscalls.
+			var createdDirs = new System.Collections.Concurrent.ConcurrentDictionary<String, Boolean>(StringComparer.OrdinalIgnoreCase);
+
+			// Each thread owns a forked DataForge with its own stream position and
+			// recursion stacks, so reads are fully parallel — no shared lock needed.
 			Parallel.ForEach(
 				this.PathToRecordMap.Keys,
 				new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount },
-				fileReference =>
+				() => this.Fork(),
+				(fileReference, _, localReader) =>
 				{
-					var node = this.ReadRecordByPathAsXml(fileReference);
-					if (node == null) { Interlocked.Increment(ref skipped); return; }
+					var node = localReader.ReadRecordByPathAsXml(fileReference);
+					if (node == null) { Interlocked.Increment(ref skipped); return localReader; }
 
 					var newPath = Path.Combine(baseDir, fileReference);
 					var dir = Path.GetDirectoryName(newPath);
-					if (!String.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+					if (!String.IsNullOrEmpty(dir))
+						createdDirs.GetOrAdd(dir, static d => { Directory.CreateDirectory(d); return true; });
 
 					using (var fileStream = File.Create(newPath))
 					using (var writer = XmlWriter.Create(fileStream, _xmlSettings))
@@ -624,7 +713,9 @@ namespace unforge
 						Interlocked.Add(ref bytesWritten, fileStream.Length);
 					}
 					Interlocked.Increment(ref written);
-				}
+					return localReader;
+				},
+				localReader => localReader.Dispose()
 			);
 
 			totalSw.Stop();
