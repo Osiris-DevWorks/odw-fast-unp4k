@@ -9,7 +9,14 @@ namespace sc.gamedata
 {
 	internal static class VehicleExtractor
 	{
-		private const String PathPrefix = "libs/foundry/records/entities/spaceships/";
+		// CIG splits the player-vehicle roster across two record trees. Ground
+		// vehicles (Cyclone, Storm, Nova, Ursa, MULE, ROC, Ballista, …) live in
+		// their own subtree, so walking only `spaceships/` silently dropped all
+		// 40 of them — see battlestations#318. Note ATLS is NOT here: it is a
+		// mech suit under `scitem/`, a different entity class entirely.
+		private const String SpaceshipPrefix = "libs/foundry/records/entities/spaceships/";
+		private const String GroundVehiclePrefix = "libs/foundry/records/entities/groundvehicles/";
+		private static readonly String[] PathPrefixes = { SpaceshipPrefix, GroundVehiclePrefix };
 
 		// Matches CIG's `_PU_Pirate`, `_Wreck`, `_NPC`, `_Hijacked`, etc. on
 		// the entity id so mission/AI/event variants don't clutter the player
@@ -61,8 +68,11 @@ namespace sc.gamedata
 			var result = new List<VehicleRecord>();
 			foreach (var path in df.PathToRecordMap.Keys)
 			{
-				if (!path.StartsWith(PathPrefix, StringComparison.OrdinalIgnoreCase)) continue;
-				var rest = path.Substring(PathPrefix.Length);
+				var prefix = PathPrefixes.FirstOrDefault(
+					p => path.StartsWith(p, StringComparison.OrdinalIgnoreCase));
+				if (prefix == null) continue;
+				var isGroundVehicle = ReferenceEquals(prefix, GroundVehiclePrefix);
+				var rest = path.Substring(prefix.Length);
 				if (rest.Contains('/')) continue;
 
 				var root = df.ReadRecordByPathAsXml(path);
@@ -133,7 +143,13 @@ namespace sc.gamedata
 				ArmorRecord? armor = null;
 				if (!String.IsNullOrEmpty(armorId)) armorById.TryGetValue(armorId, out armor);
 
-				if (collapsedSlots.Count == 0 && armor == null) continue;
+				// Spaceships earn their place by carrying weapons or armor —
+				// anything else in that tree is scenery. Ground vehicles are
+				// kept regardless: most of the roster (base Cyclone, UTV, MULE,
+				// PTV) is unarmed by design, and their value here is the
+				// physics block (size_class, mass) that drives placeholder art
+				// and the containment size fallback, not their guns.
+				if (!isGroundVehicle && collapsedSlots.Count == 0 && armor == null) continue;
 
 				// Display name fix-ups: drop the leading manufacturer word
 				// when the loc entry includes it (Aegis Avenger Titan →
