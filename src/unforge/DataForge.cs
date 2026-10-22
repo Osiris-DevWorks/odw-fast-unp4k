@@ -594,7 +594,16 @@ namespace unforge
 			CheckCharacters = false
 		};
 
-		public void Save(String filename)
+		public void Save(String filename) => this.Save(filename, null);
+
+		/// <summary>
+		/// Writes one XML file per record under the folder of <paramref name="filename"/>.
+		/// With <paramref name="includePrefixes"/>, only the records whose path is one of
+		/// those prefixes or lies under one are read and written. A prefix matches whole
+		/// path segments, ignoring case, with "/" and "\" alike, so "a/b" takes "a/b/c.xml"
+		/// but not "a/bc.xml". Null or empty writes every record, as Save(filename) does.
+		/// </summary>
+		public void Save(String filename, IReadOnlyCollection<String> includePrefixes)
 		{
 			var totalSw = Stopwatch.StartNew();
 			var baseDir = Path.GetDirectoryName(Path.GetFullPath(filename)) ?? ".";
@@ -602,10 +611,15 @@ namespace unforge
 			var skipped = 0;
 			Int64 bytesWritten = 0;
 
+			var filtered = includePrefixes != null && includePrefixes.Count > 0;
+			ICollection<String> recordPaths = filtered
+				? this.SelectRecordPaths(includePrefixes)
+				: this.PathToRecordMap.Keys;
+
 			// Reads are serialized by the lock inside ReadRecordByPathAsXml;
 			// writes are independent so they run in parallel across all cores.
 			Parallel.ForEach(
-				this.PathToRecordMap.Keys,
+				recordPaths,
 				new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount },
 				fileReference =>
 				{
@@ -632,8 +646,30 @@ namespace unforge
 			Console.WriteLine();
 			Console.WriteLine("=== unforge Save() timing ===");
 			Console.WriteLine($"  records:    {written} written, {skipped} skipped (null)");
+			if (filtered)
+			{
+				Console.WriteLine($"  include:    {recordPaths.Count} of {this.PathToRecordMap.Count} records under {includePrefixes.Count} prefixes");
+			}
 			Console.WriteLine($"  output:     {bytesWritten / 1_048_576.0,8:F1} MB");
 			Console.WriteLine($"  total:      {totalSw.Elapsed.TotalSeconds,8:F2}s");
+		}
+
+		private List<String> SelectRecordPaths(IReadOnlyCollection<String> includePrefixes)
+		{
+			var prefixes = includePrefixes
+				.Select(prefix => prefix.Replace('\\', '/').Trim('/'))
+				.ToArray();
+
+			return this.PathToRecordMap.Keys
+				.Where(recordPath =>
+				{
+					var path = recordPath.Replace('\\', '/');
+					return prefixes.Any(prefix =>
+						prefix.Length == 0 ||
+						(path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+						 (path.Length == prefix.Length || path[prefix.Length] == '/')));
+				})
+				.ToList();
 		}
 	}
 }

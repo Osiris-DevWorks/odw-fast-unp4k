@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
@@ -21,9 +22,27 @@ namespace unforge.cli
 				// args = new String[] { @"S:\Mods\BuildXPLOR\archive-3.0\661655\Data\game.dcb" };
 			}
 
-			if (args.Length < 1 || args.Length > 1)
+			// After the infile: any number of "--include <record path prefix>"
+			// pairs. Anything else there prints the usage, as any second
+			// argument always has.
+			var includes = new List<String>();
+			var showUsage = false;
+			for (var i = 1; i < args.Length; i += 2)
 			{
-				Console.WriteLine("Usage: unforge.exe [infile]");
+				if (args[i] == "--include" && i + 1 < args.Length && !String.IsNullOrWhiteSpace(args[i + 1]))
+				{
+					includes.Add(args[i + 1]);
+				}
+				else
+				{
+					showUsage = true;
+					break;
+				}
+			}
+
+			if (showUsage)
+			{
+				Console.WriteLine("Usage: unforge.exe [infile] [--include <record path prefix>]...");
 				Console.WriteLine();
 				Console.WriteLine("Converts any Star Citizen binary file into an actual XML file.");
 				Console.WriteLine("CryXml files (.xml) are saved as .raw in the original location.");
@@ -33,6 +52,10 @@ namespace unforge.cli
 				Console.WriteLine("sub-directories. In that case, all CryXml files are saved in-place,");
 				Console.WriteLine("and any DataForge files are saved to both .xml and extracted to");
 				Console.WriteLine("the original component locations.");
+				Console.WriteLine();
+				Console.WriteLine("--include limits a DataForge file to the records whose path is the");
+				Console.WriteLine("prefix or lies under it, e.g. libs/foundry/records/entities/scitem.");
+				Console.WriteLine("Repeat it for more prefixes. Without it every record is saved.");
 				return;
 			}
 
@@ -46,14 +69,14 @@ namespace unforge.cli
 					{
 						Console.WriteLine("Converting {0}", file.Replace(args[0], ""));
 
-						Smelter.Instance.Smelt(file);
+						Smelter.Instance.Smelt(file, includes: includes);
 					}
 					catch (Exception) { }
 				}
 			}
 			else
 			{
-				Smelter.Instance.Smelt(args[0]);
+				Smelter.Instance.Smelt(args[0], includes: includes);
 			}
 		}
 	}
@@ -64,7 +87,7 @@ namespace unforge.cli
 
 		private Boolean _overwrite;
 
-		public void Smelt(String path, Boolean overwrite = true)
+		public void Smelt(String path, Boolean overwrite = true, IReadOnlyCollection<String> includes = null)
 		{
 			this._overwrite = overwrite;
 
@@ -79,7 +102,7 @@ namespace unforge.cli
 						var df = new DataForge(fileStream);
 						ctorSw.Stop();
 						Console.WriteLine($"DataForge ctor (header + tables): {ctorSw.Elapsed.TotalSeconds:F2}s");
-						df.Save(Path.ChangeExtension(path, "xml"));
+						df.Save(Path.ChangeExtension(path, "xml"), includes);
 					}
 					else
 					{
