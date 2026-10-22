@@ -22,7 +22,7 @@ NOTE: The filter does not fully support wildcards. To extract files of a certain
 
 # unforge
 
-`unforge.exe [infile] [--include <record path prefix>]...` converts Star Citizen binary files into XML. A CryXml file is saved as text XML beside it under the same name with an `.xml` extension, so a binary `.xml` file is overwritten in place, and a file that is already text XML is left as it is. A DataForge file (`.dcb`) is written as one XML file per record, in folders beside it. The infile can also be a folder, whose files are all converted (except `.ini` and `.txt` files). With no infile, it reads `game.dcb` in the current folder.
+`unforge.exe [infile] [--include <record path prefix>]...` converts Star Citizen binary files into XML. A CryXml file is saved as text XML beside it under the same name with an `.xml` extension, so a binary `.xml` file is overwritten in place, and a file that is already text XML is left as it is. A DataForge file (`.dcb`) is written as one XML file per record, in folders beside it. The infile can also be a folder. Every file in it and its subfolders is tried, and a file that is not CryXml, text XML or a DataForge file is left as it is, with an error line printed for it. With no arguments at all, it reads `game.dcb` in the current folder. `--include` needs an infile before it.
 
 `--include` limits a DataForge file to the records whose path is the prefix or lies under it. A prefix matches whole path segments, ignoring case, with `/` and `\` alike, so `a/b` takes `a/b/c.xml` but not `a/bc.xml`. Repeat it for more prefixes. Without it, every record is saved.
 
