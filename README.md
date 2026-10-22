@@ -20,6 +20,17 @@ NOTE: unforge currently requires [.Net Framework 4.6.2](https://www.microsoft.co
 
 NOTE: The filter does not fully support wildcards. To extract files of a certain type, you may use `*.ext` as the filter, but no further wildcard functionality exists.
 
+# unforge
+
+`unforge.exe [infile] [--include <record path prefix>]...` converts Star Citizen binary files into XML. CryXml files (`.xml`) are saved as `.raw` in the original location. A DataForge file (`.dcb`) is saved as `.xml`, and each of its records is written as an XML file in folders beside it. The infile can also be a folder, whose compatible files are all converted.
+
+`--include` limits a DataForge file to the records whose path is the prefix or lies under it. A prefix matches whole path segments, ignoring case, with `/` and `\` alike, so `a/b` takes `a/b/c.xml` but not `a/bc.xml`. Repeat it for more prefixes. Without it, every record is saved.
+
+```
+unforge.exe Game2.dcb
+unforge.exe Game2.dcb --include libs/foundry/records/entities/scitem --include libs/foundry/records/crafting
+```
+
 # unp4k.fs - Virtual Filesystem
 
 `unp4k.fs` mounts a `.p4k` or `.dcb` file as a read-only virtual drive using [Dokan](https://github.com/dokan-dev/dokany), letting you browse and read Star Citizen game assets directly in Windows Explorer without extracting anything to disk.
