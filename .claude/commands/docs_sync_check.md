@@ -32,7 +32,7 @@ Flag any discrepancy: missing fields, wrong types, wrong offsets, missing versio
 For each executable described in `README.md`:
 - **unp4k** — verify argument positions, default values, filter behavior description against `src/unp4k/Program.cs`
 - **unp4k.fs** — verify argument positions, mount-point defaults, interactive key options against `src/unp4k.fs/Program.cs`
-- **unforge.cli** — verify described behavior (`.dcb` → XML, CryXML → `.raw` rename) against `src/unforge.cli/Program.cs`
+- **unforge.cli** — verify described behavior (`.dcb` → one XML file per record beside it, CryXml → text XML under the same name, `--exclude` and `--exclude-file`, exit codes) against `src/unforge.cli/Program.cs`, and the matching rules against `DataForge.Save` and `IsExcluded` in `src/unforge/DataForge.cs`
 
 Flag usage descriptions that no longer match, missing new arguments, or described behavior that has changed.
 

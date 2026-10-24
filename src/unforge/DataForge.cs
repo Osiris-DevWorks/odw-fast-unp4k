@@ -674,7 +674,18 @@ namespace unforge
 			CheckCharacters = false
 		};
 
-		public void Save(String filename)
+		public void Save(String filename) => this.Save(filename, null);
+
+		/// <summary>
+		/// Writes one XML file per record that has any content, in folders under the folder of
+		/// <paramref name="filename"/>, leaving out the records whose path is one of
+		/// <paramref name="excludePaths"/> or lies under one. A path matches whole segments,
+		/// ignoring case and surrounding spaces, with "/" and "\" alike, so "a/b" leaves out
+		/// "a/b/c.xml" but not "a/bc.xml". Null or empty writes every record, as
+		/// Save(filename) does. Anything a game update adds outside those paths is written,
+		/// and a path that matches no record is reported.
+		/// </summary>
+		public void Save(String filename, IReadOnlyCollection<String> excludePaths)
 		{
 			var totalSw = Stopwatch.StartNew();
 			var baseDir = Path.GetDirectoryName(Path.GetFullPath(filename)) ?? ".";
@@ -682,12 +693,23 @@ namespace unforge
 			var skipped = 0;
 			Int64 bytesWritten = 0;
 
+			var exclude = new HashSet<String>(
+				(excludePaths ?? Array.Empty<String>())
+					.Where(path => path != null)
+					.Select(path => path.Trim().Replace('\\', '/').Trim('/'))
+					.Where(path => path.Length > 0),
+				StringComparer.OrdinalIgnoreCase);
+			var matched = new HashSet<String>(StringComparer.OrdinalIgnoreCase);
+			var records = this.PathToRecordMap
+				.Where(record => exclude.Count == 0 || !IsExcluded(record.Key, exclude, matched))
+				.ToList();
+
 			this.FillLazyFields();
 
 			// Each thread reads through a fork of its own, so reads run in
 			// parallel as well as writes, without ReadRecordByPathAsXml's lock.
 			Parallel.ForEach(
-				this.PathToRecordMap,
+				records,
 				new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount },
 				() => this.Fork(),
 				(record, _, reader) =>
@@ -717,8 +739,47 @@ namespace unforge
 			Console.WriteLine();
 			Console.WriteLine("=== unforge Save() timing ===");
 			Console.WriteLine($"  records:    {written} written, {skipped} skipped (null)");
+			if (exclude.Count > 0)
+			{
+				Console.WriteLine($"  exclude:    {this.PathToRecordMap.Count - records.Count} of {this.PathToRecordMap.Count} records left out under {exclude.Count} {(exclude.Count == 1 ? "path" : "paths")}");
+
+				// A path that matches nothing is most likely a folder a game
+				// update renamed or removed, so the list needs looking at.
+				foreach (var path in exclude.Where(path => !matched.Contains(path)).OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+				{
+					Console.WriteLine($"  exclude:    no record at or under {path}");
+				}
+			}
+			else if (excludePaths != null && excludePaths.Count > 0)
+			{
+				Console.WriteLine("  exclude:    no usable path given, so no record was left out");
+			}
 			Console.WriteLine($"  output:     {bytesWritten / 1_048_576.0,8:F1} MB");
 			Console.WriteLine($"  total:      {totalSw.Elapsed.TotalSeconds,8:F2}s");
+		}
+
+		// Whether recordPath is one of exclude's paths or lies under one: the
+		// path itself and each folder above it are looked up whole. Every
+		// exclude path that matches is added to matched.
+		private static Boolean IsExcluded(String recordPath, HashSet<String> exclude, HashSet<String> matched)
+		{
+			var path = recordPath.Replace('\\', '/').TrimStart('/');
+			var excluded = false;
+			for (var slash = path.IndexOf('/'); slash >= 0; slash = path.IndexOf('/', slash + 1))
+			{
+				var folder = path.Substring(0, slash);
+				if (exclude.Contains(folder))
+				{
+					matched.Add(folder);
+					excluded = true;
+				}
+			}
+			if (exclude.Contains(path))
+			{
+				matched.Add(path);
+				excluded = true;
+			}
+			return excluded;
 		}
 
 		// Fills the definitions' lazy fields before Save's threads share them,

@@ -7,7 +7,7 @@ These tools allow users to open, decrypt, and extract data from Star Citizen `.p
 3. Under the *General* tab, check the *Unblock* checkbox at the bottom if it exists, and click ok
 4. Extract the selected zip to your desired installation directory
 
-NOTE: unforge currently requires [.Net Framework 4.6.2](https://www.microsoft.com/net/download/thank-you/net462) or greater to run. If you receive the error `Method not found: '!!0[] System.Array.Empty()'.` you will need to install this framework.
+NOTE: The Windows release is self-contained and needs no .NET install. The Linux builds need the .NET 10 runtime.
 
 # Quickstart:
 
@@ -19,6 +19,20 @@ NOTE: unforge currently requires [.Net Framework 4.6.2](https://www.microsoft.co
 2. Execute `unp4k.exe c:\path\to\data.p4k [filter]` where filter is a keyword used to filter the results (the default filter is `*.*`)
 
 NOTE: The filter does not fully support wildcards. To extract files of a certain type, you may use `*.ext` as the filter, but no further wildcard functionality exists.
+
+# unforge
+
+`unforge.cli.exe [infile [--exclude <record path> | --exclude-file <file>]...]` converts Star Citizen binary files into XML. Tools that bundle it may call it `unforge.exe`. `unforge.cli.exe --help` prints the usage. A CryXml file is saved as text XML under the same name with an `.xml` extension, replacing any file of that name, so a binary `.xml` file is converted in place. A file that starts with `<` is taken as text XML and left as it is. A DataForge file (`.dcb`) is written as one XML file per record that has any content, in folders beside it. The infile can also be a folder. Every file in it and its subfolders is tried, and a file that is not CryXml, text XML or a DataForge file is left as it is, with an error line printed for it. With no arguments at all, it reads `game.dcb` in the current folder. The flags need an infile before them, and can come in any order.
+
+`--exclude` leaves out of a DataForge file the record at that path and every record under it. A path matches whole segments, ignoring case and surrounding spaces, with `/` and `\` alike, so `a/b` leaves out `a/b/c.xml` but not `a/bc.xml`. `--exclude-file` reads such paths from a UTF-8 text file (or one with a byte order mark), one a line, skipping blank lines and lines that start with `#`, for lists too long for a command line. Both can be repeated. Every other record is saved, including any a game update adds. A path that matches no record is reported on a line ending `no record at or under <path>`, with the path as unforge normalised it (forward slashes, no slashes or spaces around it). That is most likely a folder a game update renamed or removed, and the run carries on.
+
+unforge exits with 1 when the arguments are wrong, the infile does not exist, a list file cannot be read or a single infile cannot be converted, and with 0 otherwise. A file that cannot be converted prints a line starting `Error converting`. In folder mode the run carries on past such files and exits 0.
+
+```
+unforge.cli.exe Game2.dcb
+unforge.cli.exe Game2.dcb --exclude libs/foundry/records/actor --exclude libs/foundry/records/audio
+unforge.cli.exe Game2.dcb --exclude-file unused-records.txt
+```
 
 # unp4k.fs - Virtual Filesystem
 
@@ -64,8 +78,8 @@ Star Citizen also implements bespoke encryption over *some* of the data inside t
 
 Inside the p4k file, XML files are often stored as CryXML rather than raw XML.
 
-CryXML is a basic serialized XML format which `unforge.exe` is able to deserialize.
+CryXML is a basic serialized XML format which `unforge.cli.exe` is able to deserialize.
 
 Inside the p4k file, there is also a `game.dcb` file, which is a bespoke database format, with similarities to CryXML.
 
-This is the product of what is known internally as "DataForge", and is also able to be converted/extracted using the `unforge.exe` tool.
+This is the product of what is known internally as "DataForge", and is also able to be converted/extracted using the `unforge.cli.exe` tool.
