@@ -73,18 +73,18 @@ namespace unforge
 			}
 		}
 
-		public IEnumerable<XmlNode> ReadAsXml(XmlNode parentNode)
+		public IEnumerable<XmlNode> ReadAsXml(DataForge reader, XmlNode parentNode)
 		{
 			var i = 0;
 
 			foreach (var propertyDefinition in this.PropertyDefinitions)
 			{
-				if (propertyDefinition.ConversionType == EConversionType.varAttribute) yield return this.ReadValueAsXml(parentNode, propertyDefinition);
+				if (propertyDefinition.ConversionType == EConversionType.varAttribute) yield return this.ReadValueAsXml(reader, parentNode, propertyDefinition);
 				else
 				{
 					var xmlNode = parentNode.OwnerDocument.CreateElement(propertyDefinition.Name);
 
-					foreach (var childNode in this.ReadArrayAsXml(xmlNode, propertyDefinition))
+					foreach (var childNode in this.ReadArrayAsXml(reader, xmlNode, propertyDefinition))
 					{
 								if (childNode == null) continue;
 						xmlNode.AppendChild(childNode);
@@ -99,7 +99,7 @@ namespace unforge
 			}
 		}
 
-		public XmlNode ReadValueAsXml(XmlNode parentNode, DataForgePropertyDefinition propertyDefinition, String nameOverride = null)
+		public XmlNode ReadValueAsXml(DataForge reader, XmlNode parentNode, DataForgePropertyDefinition propertyDefinition, String nameOverride = null)
 		{
 			try
 			{
@@ -107,11 +107,11 @@ namespace unforge
 				{
 					case EDataType.varClass:
 						{
-							var dataStruct = this.StreamReader.ReadStructDefinitionAtIndex(propertyDefinition.Index);
+							var dataStruct = reader.ReadStructDefinitionAtIndex(propertyDefinition.Index);
 
 							var xmlNode = parentNode.OwnerDocument.CreateElement(nameOverride ?? propertyDefinition.Name);
 
-							foreach (var childNode in dataStruct.ReadAsXml(xmlNode))
+							foreach (var childNode in dataStruct.ReadAsXml(reader, xmlNode))
 							{
 								if (childNode == null) continue;
 								if (childNode is XmlAttribute attribute) xmlNode.Attributes.Append(attribute);
@@ -126,13 +126,13 @@ namespace unforge
 						}
 					case EDataType.varReference:
 						{
-							var dataForgeReference = DataForgeReference.ReadFromStream(this.StreamReader);
+							var dataForgeReference = DataForgeReference.ReadFromStream(reader);
 
 							if (dataForgeReference.IsNull) return null;
 
-							if (!this.StreamReader.FollowReferences) return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, dataForgeReference.Value);
+							if (!reader.FollowReferences) return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, dataForgeReference.Value);
 							
-							var xmlNode = this.StreamReader.ReadRecordByReferenceAsXml(parentNode, dataForgeReference.Value);
+							var xmlNode = reader.ReadRecordByReferenceAsXml(parentNode, dataForgeReference.Value);
 
 							if (xmlNode == null) return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, dataForgeReference.Value);
 
@@ -142,17 +142,17 @@ namespace unforge
 						}
 					case EDataType.varStrongPointer:
 						{
-							var pointer = DataForgePointer.ReadFromStream(this.StreamReader);
+							var pointer = DataForgePointer.ReadFromStream(reader);
 
 							if (pointer.IsNull) return null;
 
-							var dataStruct = this.StreamReader.ReadStructDefinitionAtIndex(pointer.StructIndex);
+							var dataStruct = reader.ReadStructDefinitionAtIndex(pointer.StructIndex);
 
 							if (dataStruct == null) return null;
 							
-							if (!this.StreamReader.FollowStrongPointers) return parentNode.CreateElementWithValue(nameOverride ?? propertyDefinition.Name, String.Format("{1}[{2:X4}]", propertyDefinition.DataType, dataStruct.Name, pointer.VariantIndex, pointer.Padding));
+							if (!reader.FollowStrongPointers) return parentNode.CreateElementWithValue(nameOverride ?? propertyDefinition.Name, String.Format("{1}[{2:X4}]", propertyDefinition.DataType, dataStruct.Name, pointer.VariantIndex, pointer.Padding));
 
-							var xmlNode = this.StreamReader.ReadStructAtIndexAsXml(parentNode.OwnerDocument.CreateElement(dataStruct.Name), pointer.StructIndex, pointer.VariantIndex);
+							var xmlNode = reader.ReadStructAtIndexAsXml(parentNode.OwnerDocument.CreateElement(dataStruct.Name), pointer.StructIndex, pointer.VariantIndex);
 
 							if (xmlNode == null) return null;
 
@@ -162,15 +162,15 @@ namespace unforge
 						}
 					case EDataType.varWeakPointer:
 						{
-							var pointer = DataForgePointer.ReadFromStream(this.StreamReader);
+							var pointer = DataForgePointer.ReadFromStream(reader);
 
 							if (pointer.IsNull) return null;
 
-							var dataStruct = this.StreamReader.ReadStructDefinitionAtIndex(pointer.StructIndex);
+							var dataStruct = reader.ReadStructDefinitionAtIndex(pointer.StructIndex);
 
 							return parentNode.CreateElementWithValue(nameOverride ?? propertyDefinition.Name, String.Format("{1}[{2:X4}]", propertyDefinition.DataType, dataStruct.Name, pointer.VariantIndex, pointer.Padding));
 
-							var result = this.StreamReader.ReadStructAtIndexAsXml(parentNode.OwnerDocument.CreateElement(dataStruct.Name), pointer.StructIndex, pointer.VariantIndex);
+							var result = reader.ReadStructAtIndexAsXml(parentNode.OwnerDocument.CreateElement(dataStruct.Name), pointer.StructIndex, pointer.VariantIndex);
 
 							if (result != null) return parentNode.CreateElementWithValue(nameOverride ?? propertyDefinition.Name, result);
 
@@ -178,24 +178,24 @@ namespace unforge
 						}
 					case EDataType.varLocale:
 						{
-							var localeIndex = this.StreamReader.ReadUInt32();
+							var localeIndex = reader.ReadUInt32();
 
-							return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, this.StreamReader.ReadTextAtOffset(localeIndex));
+							return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, reader.ReadTextAtOffset(localeIndex));
 						}
-					case EDataType.varString: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, this.StreamReader.ReadTextAtOffset(this.StreamReader.ReadUInt32()));
-					case EDataType.varEnum: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, this.StreamReader.ReadEnumAtOffset(this.StreamReader.ReadUInt32()));
-					case EDataType.varBoolean: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, this.StreamReader.ReadByte());
-					case EDataType.varSingle: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, this.StreamReader.ReadSingle());
-					case EDataType.varDouble: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, this.StreamReader.ReadDouble());
-					case EDataType.varGuid: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, this.StreamReader.ReadGuid(false));
-					case EDataType.varInt8: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, this.StreamReader.ReadSByte());
-					case EDataType.varInt16: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, this.StreamReader.ReadInt16());
-					case EDataType.varInt32: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, this.StreamReader.ReadInt32());
-					case EDataType.varInt64: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, this.StreamReader.ReadInt64());
-					case EDataType.varUInt8: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, this.StreamReader.ReadByte());
-					case EDataType.varUInt16: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, this.StreamReader.ReadUInt16());
-					case EDataType.varUInt32: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, this.StreamReader.ReadUInt32());
-					case EDataType.varUInt64: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, this.StreamReader.ReadUInt64());
+					case EDataType.varString: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, reader.ReadTextAtOffset(reader.ReadUInt32()));
+					case EDataType.varEnum: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, reader.ReadEnumAtOffset(reader.ReadUInt32()));
+					case EDataType.varBoolean: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, reader.ReadByte());
+					case EDataType.varSingle: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, reader.ReadSingle());
+					case EDataType.varDouble: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, reader.ReadDouble());
+					case EDataType.varGuid: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, reader.ReadGuid(false));
+					case EDataType.varInt8: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, reader.ReadSByte());
+					case EDataType.varInt16: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, reader.ReadInt16());
+					case EDataType.varInt32: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, reader.ReadInt32());
+					case EDataType.varInt64: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, reader.ReadInt64());
+					case EDataType.varUInt8: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, reader.ReadByte());
+					case EDataType.varUInt16: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, reader.ReadUInt16());
+					case EDataType.varUInt32: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, reader.ReadUInt32());
+					case EDataType.varUInt64: return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, reader.ReadUInt64());
 				}
 			}
 			catch (Exception ex)
@@ -206,77 +206,77 @@ namespace unforge
 			return parentNode.CreateAttributeWithValue(nameOverride ?? propertyDefinition.Name, $"Unhandled Type {propertyDefinition.DataType}");
 		}
 
-		public IEnumerable<XmlElement> ReadArrayAsXml(XmlNode parentNode, DataForgePropertyDefinition propertyDefinition)
+		public IEnumerable<XmlElement> ReadArrayAsXml(DataForge reader, XmlNode parentNode, DataForgePropertyDefinition propertyDefinition)
 		{
-			var arrayCount = this.StreamReader.ReadUInt32();
-			var firstIndex = this.StreamReader.ReadUInt32();
+			var arrayCount = reader.ReadUInt32();
+			var firstIndex = reader.ReadUInt32();
 
 			for (UInt16 i = 0; i < arrayCount; i++)
 			{
-				yield return this.ReadArrayValueAsXml(parentNode, propertyDefinition, firstIndex, i);
+				yield return this.ReadArrayValueAsXml(reader, parentNode, propertyDefinition, firstIndex, i);
 				
 				if (i >= (DataForge.MaxNodes - 1)) break;
 			}
 		}
 
-		public XmlElement ReadArrayValueAsXml(XmlNode parentNode, DataForgePropertyDefinition propertyDefinition, UInt32 firstIndex, UInt16 offset)
+		public XmlElement ReadArrayValueAsXml(DataForge reader, XmlNode parentNode, DataForgePropertyDefinition propertyDefinition, UInt32 firstIndex, UInt16 offset)
 		{
 			try
 			{
 				switch (propertyDefinition.DataType)
 				{
-					case EDataType.varBoolean: return parentNode.CreateElementWithValue($"Bool", this.StreamReader.ReadBooleanAtIndex(firstIndex + offset).Value ? 1 : 0);
+					case EDataType.varBoolean: return parentNode.CreateElementWithValue($"Bool", reader.ReadBooleanAtIndex(firstIndex + offset).Value ? 1 : 0);
 
-					case EDataType.varSingle: return parentNode.CreateElementWithValue($"Single", this.StreamReader.ReadSingleAtIndex(firstIndex + offset).Value);
-					case EDataType.varDouble: return parentNode.CreateElementWithValue($"Double", this.StreamReader.ReadDoubleAtIndex(firstIndex + offset).Value);
+					case EDataType.varSingle: return parentNode.CreateElementWithValue($"Single", reader.ReadSingleAtIndex(firstIndex + offset).Value);
+					case EDataType.varDouble: return parentNode.CreateElementWithValue($"Double", reader.ReadDoubleAtIndex(firstIndex + offset).Value);
 
-					case EDataType.varGuid: return parentNode.CreateElementWithValue($"Guid", this.StreamReader.ReadGuidAtIndex(firstIndex + offset).Value);
+					case EDataType.varGuid: return parentNode.CreateElementWithValue($"Guid", reader.ReadGuidAtIndex(firstIndex + offset).Value);
 					case EDataType.varReference:
 
-						if (this.StreamReader.FollowReferences)
+						if (reader.FollowReferences)
 						{
-							var dataForgeReference = this.StreamReader.ReadReferenceAtIndex(firstIndex + offset);
-							var xmlNode = this.StreamReader.ReadRecordByReferenceAsXml(parentNode, dataForgeReference.Value);
+							var dataForgeReference = reader.ReadReferenceAtIndex(firstIndex + offset);
+							var xmlNode = reader.ReadRecordByReferenceAsXml(parentNode, dataForgeReference.Value);
 
 							if (xmlNode is XmlElement xmlElement) return xmlElement;
 						}
 
-						return parentNode.CreateElementWithValue($"Reference", this.StreamReader.ReadReferenceAtIndex(firstIndex + offset).Value);
+						return parentNode.CreateElementWithValue($"Reference", reader.ReadReferenceAtIndex(firstIndex + offset).Value);
 				
-					case EDataType.varUInt8: return parentNode.CreateElementWithValue($"UInt8", this.StreamReader.ReadUInt8AtIndex(firstIndex + offset).Value);
-					case EDataType.varUInt16: return parentNode.CreateElementWithValue($"UInt16", this.StreamReader.ReadUInt16AtIndex(firstIndex + offset).Value);
-					case EDataType.varUInt32: return parentNode.CreateElementWithValue($"UInt32", this.StreamReader.ReadUInt32AtIndex(firstIndex + offset).Value);
-					case EDataType.varUInt64: return parentNode.CreateElementWithValue($"UInt64", this.StreamReader.ReadUInt64AtIndex(firstIndex + offset).Value);
+					case EDataType.varUInt8: return parentNode.CreateElementWithValue($"UInt8", reader.ReadUInt8AtIndex(firstIndex + offset).Value);
+					case EDataType.varUInt16: return parentNode.CreateElementWithValue($"UInt16", reader.ReadUInt16AtIndex(firstIndex + offset).Value);
+					case EDataType.varUInt32: return parentNode.CreateElementWithValue($"UInt32", reader.ReadUInt32AtIndex(firstIndex + offset).Value);
+					case EDataType.varUInt64: return parentNode.CreateElementWithValue($"UInt64", reader.ReadUInt64AtIndex(firstIndex + offset).Value);
 					
-					case EDataType.varInt8: return parentNode.CreateElementWithValue($"Int8", this.StreamReader.ReadInt8AtIndex(firstIndex + offset).Value);
-					case EDataType.varInt16: return parentNode.CreateElementWithValue($"Int16", this.StreamReader.ReadInt16AtIndex(firstIndex + offset).Value);
-					case EDataType.varInt32: return parentNode.CreateElementWithValue($"Int32", this.StreamReader.ReadInt32AtIndex(firstIndex + offset).Value);
-					case EDataType.varInt64: return parentNode.CreateElementWithValue($"Int64", this.StreamReader.ReadInt64AtIndex(firstIndex + offset).Value);
+					case EDataType.varInt8: return parentNode.CreateElementWithValue($"Int8", reader.ReadInt8AtIndex(firstIndex + offset).Value);
+					case EDataType.varInt16: return parentNode.CreateElementWithValue($"Int16", reader.ReadInt16AtIndex(firstIndex + offset).Value);
+					case EDataType.varInt32: return parentNode.CreateElementWithValue($"Int32", reader.ReadInt32AtIndex(firstIndex + offset).Value);
+					case EDataType.varInt64: return parentNode.CreateElementWithValue($"Int64", reader.ReadInt64AtIndex(firstIndex + offset).Value);
 					
-					case EDataType.varString: return parentNode.CreateElementWithValue($"String", this.StreamReader.ReadStringAtIndex(firstIndex + offset).Value);
-					case EDataType.varLocale: return parentNode.CreateElementWithValue($"LocID", this.StreamReader.ReadLocaleAtIndex(firstIndex + offset).Value);
-					case EDataType.varEnum: return parentNode.CreateElementWithValue($"Enum", this.StreamReader.ReadEnumValueAtIndex(firstIndex + offset).Value);
+					case EDataType.varString: return parentNode.CreateElementWithValue($"String", reader.ReadStringAtIndex(firstIndex + offset).Value);
+					case EDataType.varLocale: return parentNode.CreateElementWithValue($"LocID", reader.ReadLocaleAtIndex(firstIndex + offset).Value);
+					case EDataType.varEnum: return parentNode.CreateElementWithValue($"Enum", reader.ReadEnumValueAtIndex(firstIndex + offset).Value);
 
 					case EDataType.varWeakPointer:
 						{
-							var pointer = this.StreamReader.ReadWeakPointerAtIndex(offset + firstIndex);
-							var dataMapping = this.StreamReader.ReadDataMappingAtIndex(pointer.StructIndex);
+							var pointer = reader.ReadWeakPointerAtIndex(offset + firstIndex);
+							var dataMapping = reader.ReadDataMappingAtIndex(pointer.StructIndex);
 
-							return this.StreamReader.ReadStructAtIndexAsXml(parentNode.OwnerDocument.CreateElement(dataMapping.Name), pointer.StructIndex, pointer.VariantIndex);
+							return reader.ReadStructAtIndexAsXml(parentNode.OwnerDocument.CreateElement(dataMapping.Name), pointer.StructIndex, pointer.VariantIndex);
 						}
 					case EDataType.varStrongPointer:
 						{
-							var pointer = this.StreamReader.ReadStrongPointerAtIndex(offset + firstIndex);
-							var dataMapping = this.StreamReader.ReadDataMappingAtIndex(pointer.StructIndex);
+							var pointer = reader.ReadStrongPointerAtIndex(offset + firstIndex);
+							var dataMapping = reader.ReadDataMappingAtIndex(pointer.StructIndex);
 
-							return this.StreamReader.ReadStructAtIndexAsXml(parentNode.OwnerDocument.CreateElement(dataMapping.Name), pointer.StructIndex, pointer.VariantIndex);
+							return reader.ReadStructAtIndexAsXml(parentNode.OwnerDocument.CreateElement(dataMapping.Name), pointer.StructIndex, pointer.VariantIndex);
 						}
 					case EDataType.varClass:
 						{
 							var structIndex = (UInt32)(propertyDefinition.Index);
-							var dataMapping = this.StreamReader.ReadDataMappingAtIndex(structIndex);
+							var dataMapping = reader.ReadDataMappingAtIndex(structIndex);
 
-							return this.StreamReader.ReadStructAtIndexAsXml(parentNode.OwnerDocument.CreateElement(dataMapping.Name), propertyDefinition.Index, firstIndex + offset);
+							return reader.ReadStructAtIndexAsXml(parentNode.OwnerDocument.CreateElement(dataMapping.Name), propertyDefinition.Index, firstIndex + offset);
 						}
 				}
 			}

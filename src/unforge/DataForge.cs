@@ -105,6 +105,86 @@ namespace unforge
 			return ms;
 		}
 
+		// A fork reads the same bytes through a stream of its own, with its own
+		// RecordStack and StructStack, and shares everything else. The shared
+		// definitions fill their name and property caches on first use, so
+		// Save calls FillLazyFields before it forks, and the forks only read
+		// them. Forks can read in parallel without a lock because every read
+		// passes its reader down (DataForgeRecordDefinition.ReadAsXml and the
+		// struct definition's read methods) rather than reading the stream
+		// through the definitions' StreamReader, which is the DataForge that
+		// loaded them. A field the constructor below sets must be copied here
+		// too.
+		private DataForge(DataForge source)
+			: base(new MemoryStream(((MemoryStream)source.BaseStream).GetBuffer(), 0, (Int32)source.BaseStream.Length, writable: false, publiclyVisible: true))
+		{
+			this.IsLegacy = source.IsLegacy;
+			this.FileVersion = source.FileVersion;
+
+			this.StructDefinitionCount = source.StructDefinitionCount;
+			this.PropertyDefinitionCount = source.PropertyDefinitionCount;
+			this.EnumDefinitionCount = source.EnumDefinitionCount;
+			this.DataMappingCount = source.DataMappingCount;
+			this.RecordDefinitionCount = source.RecordDefinitionCount;
+			this.BooleanValueCount = source.BooleanValueCount;
+			this.Int8ValueCount = source.Int8ValueCount;
+			this.Int16ValueCount = source.Int16ValueCount;
+			this.Int32ValueCount = source.Int32ValueCount;
+			this.Int64ValueCount = source.Int64ValueCount;
+			this.UInt8ValueCount = source.UInt8ValueCount;
+			this.UInt16ValueCount = source.UInt16ValueCount;
+			this.UInt32ValueCount = source.UInt32ValueCount;
+			this.UInt64ValueCount = source.UInt64ValueCount;
+			this.SingleValueCount = source.SingleValueCount;
+			this.DoubleValueCount = source.DoubleValueCount;
+			this.GuidValueCount = source.GuidValueCount;
+			this.StringValueCount = source.StringValueCount;
+			this.LocaleValueCount = source.LocaleValueCount;
+			this.EnumValueCount = source.EnumValueCount;
+			this.StrongValueCount = source.StrongValueCount;
+			this.WeakValueCount = source.WeakValueCount;
+			this.ReferenceValueCount = source.ReferenceValueCount;
+			this.EnumOptionCount = source.EnumOptionCount;
+			this.TextLength = source.TextLength;
+			this.BlobLength = source.BlobLength;
+
+			this.PathToRecordMap = source.PathToRecordMap;
+			this.ReferenceToRecordMap = source.ReferenceToRecordMap;
+			this.StructToDataOffsetMap = source.StructToDataOffsetMap;
+			this._cachedDataOffset = source._cachedDataOffset;
+
+			this._textBuffer = source._textBuffer;
+			this._blobBuffer = source._blobBuffer;
+
+			this._structDefinitions = source._structDefinitions;
+			this._propertyDefinitions = source._propertyDefinitions;
+			this._enumDefinitions = source._enumDefinitions;
+			this._dataMappings = source._dataMappings;
+			this._recordDefinitions = source._recordDefinitions;
+
+			this._booleanValues = source._booleanValues;
+			this._int8Values = source._int8Values;
+			this._int16Values = source._int16Values;
+			this._int32Values = source._int32Values;
+			this._int64Values = source._int64Values;
+			this._uint8Values = source._uint8Values;
+			this._uint16Values = source._uint16Values;
+			this._uint32Values = source._uint32Values;
+			this._uint64Values = source._uint64Values;
+			this._singleValues = source._singleValues;
+			this._doubleValues = source._doubleValues;
+			this._guidValues = source._guidValues;
+			this._stringValues = source._stringValues;
+			this._localeValues = source._localeValues;
+			this._enumValues = source._enumValues;
+			this._strongPointerValues = source._strongPointerValues;
+			this._weakPointerValues = source._weakPointerValues;
+			this._referenceValues = source._referenceValues;
+			this._enumOptions = source._enumOptions;
+		}
+
+		private DataForge Fork() => new DataForge(this);
+
 		public DataForge(Stream stream) : base(WrapInMemoryStream(stream))
 		{
 			this.BaseStream.Seek(0, SeekOrigin.Begin);
@@ -445,7 +525,7 @@ namespace unforge
 		{
 			var i = 0;
 
-			foreach (var childNode in dataStruct.ReadAsXml(xmlNode))
+			foreach (var childNode in dataStruct.ReadAsXml(this, xmlNode))
 			{
 				if (childNode == null) continue;
 				if (childNode is XmlAttribute attribute) xmlNode.Attributes.Append(attribute);
@@ -536,7 +616,7 @@ namespace unforge
 
 				var record = this.ReadRecordDefinitionAtIndex(recordIndex);
 
-				return record.ReadAsXml(xmlNode);
+				return record.ReadAsXml(this, xmlNode);
 			}
 			catch (Exception ex)
 			{
@@ -602,17 +682,20 @@ namespace unforge
 			var skipped = 0;
 			Int64 bytesWritten = 0;
 
-			// Reads are serialized by the lock inside ReadRecordByPathAsXml;
-			// writes are independent so they run in parallel across all cores.
-			Parallel.ForEach(
-				this.PathToRecordMap.Keys,
-				new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount },
-				fileReference =>
-				{
-					var node = this.ReadRecordByPathAsXml(fileReference);
-					if (node == null) { Interlocked.Increment(ref skipped); return; }
+			this.FillLazyFields();
 
-					var newPath = Path.Combine(baseDir, fileReference);
+			// Each thread reads through a fork of its own, so reads run in
+			// parallel as well as writes, without ReadRecordByPathAsXml's lock.
+			Parallel.ForEach(
+				this.PathToRecordMap,
+				new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount },
+				() => this.Fork(),
+				(record, _, reader) =>
+				{
+					var node = reader.ReadRecordAtIndexAsXml(new XmlDocument(), record.Value);
+					if (node == null) { Interlocked.Increment(ref skipped); return reader; }
+
+					var newPath = Path.Combine(baseDir, record.Key);
 					var dir = Path.GetDirectoryName(newPath);
 					if (!String.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
 
@@ -624,7 +707,9 @@ namespace unforge
 						Interlocked.Add(ref bytesWritten, fileStream.Length);
 					}
 					Interlocked.Increment(ref written);
-				}
+					return reader;
+				},
+				reader => reader.Dispose()
 			);
 
 			totalSw.Stop();
@@ -634,6 +719,32 @@ namespace unforge
 			Console.WriteLine($"  records:    {written} written, {skipped} skipped (null)");
 			Console.WriteLine($"  output:     {bytesWritten / 1_048_576.0,8:F1} MB");
 			Console.WriteLine($"  total:      {totalSw.Elapsed.TotalSeconds,8:F2}s");
+		}
+
+		// Fills the definitions' lazy fields before Save's threads share them,
+		// so those threads only read them. A field that fails here is left for
+		// the read that needs it, which reports the failure as it always has.
+		private void FillLazyFields()
+		{
+			static void Fill(Func<Object> read)
+			{
+				try { read(); }
+				catch (Exception) { }
+			}
+
+			foreach (var definition in this._structDefinitions)
+			{
+				Fill(() => definition.Name);
+				Fill(() => definition.PropertyDefinitions);
+			}
+			foreach (var definition in this._propertyDefinitions) Fill(() => definition.Name);
+			foreach (var definition in this._enumDefinitions) Fill(() => definition.Name);
+			foreach (var mapping in this._dataMappings) Fill(() => mapping.Name);
+			foreach (var record in this._recordDefinitions)
+			{
+				Fill(() => record.Name);
+				if (this.FileVersion >= 8) Fill(() => record.DevTeamName);
+			}
 		}
 	}
 }

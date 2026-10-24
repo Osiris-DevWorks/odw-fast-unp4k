@@ -16,7 +16,10 @@ namespace unforge
 		public DataForgeStructDefinition StructDefinition { get => this.StreamReader.ReadStructDefinitionAtIndex(this.StructIndex); }
 
 
-		public XmlElement ReadAsXml(XmlNode xmlNode = null)
+		// The record's values are read through reader, not StreamReader:
+		// definitions are shared by every fork of a DataForge, and reader is
+		// the one whose stream position and stacks this read may use.
+		public XmlElement ReadAsXml(DataForge reader, XmlNode xmlNode = null)
 		{
 			// Ensure top level node for record
 			if (xmlNode is XmlDocument xmlDocument) xmlNode = xmlDocument.CreateElement(this.Name);
@@ -24,16 +27,16 @@ namespace unforge
 
 			var xmlElement = xmlNode as XmlElement;
 			
-			xmlElement = this.StreamReader.ReadStructAtIndexAsXml(xmlElement, this.StructIndex, this.VariantIndex);
+			xmlElement = reader.ReadStructAtIndexAsXml(xmlElement, this.StructIndex, this.VariantIndex);
 
 			if (xmlElement == null) return null;
 
 			// if (!this.StreamReader.FollowReferences)
 			// {
-			xmlElement.AddAttribute("__type", this.StructDefinition.Name);
+			xmlElement.AddAttribute("__type", reader.ReadStructDefinitionAtIndex(this.StructIndex).Name);
 			xmlElement.AddAttribute("__ref", this.Hash);
 			xmlElement.AddAttribute("__path", this.FileName);
-			if (this.StreamReader.FileVersion >= 8)
+			if (reader.FileVersion >= 8)
 			{
 				xmlElement.AddAttribute("__team", this.DevTeamName);
 			}
