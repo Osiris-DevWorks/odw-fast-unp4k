@@ -9,6 +9,18 @@
     <StartupObject>unp4k.Program</StartupObject>
   </PropertyGroup>
 
+	<!-- Reading Data.p4k's central directory makes a ZipEntry for every file
+	     in it, which is most of a run that extracts a few files from a current
+	     Data.p4k. Server GC with DATAS took a one-file run from 2.5 to 2.7 s
+	     to 2.0 to 2.1 s, for 0.1 to 0.2 GB more at peak. DATAS needs a 64-bit
+	     process on .NET 8 or later (from .NET 9 it is server GC's default).
+	     Without it server GC keeps a heap per core, so net6.0 and 32-bit
+	     builds keep workstation GC. -->
+	<PropertyGroup Condition="'$(TargetFramework)' != 'net6.0' and $(RuntimeIdentifier.EndsWith('64'))">
+		<ServerGarbageCollection>true</ServerGarbageCollection>
+		<GarbageCollectionAdaptationMode>1</GarbageCollectionAdaptationMode>
+	</PropertyGroup>
+
 	<PropertyGroup Condition="'$(Configuration)'=='Debug'">
 		<Optimize>False</Optimize>
 		<DebugType>full</DebugType>

@@ -14,7 +14,7 @@ Each check carries a severity:
 
 ## Checks
 
-- **AES key sync** *(Critical)*: the Star Citizen AES key is hardcoded in three files (`src/unp4k/Program.cs:22`, `src/unp4k.fs/Program.cs:175`, `src/sc.gamedata/Program.cs:24-28`). If the diff touches any of them, confirm all three remain identical. A mismatch silently breaks decryption for the out-of-sync tool.
+- **AES key sync** *(Critical)*: the Star Citizen AES key is hardcoded in three files (`src/unp4k/Program.cs:14`, `src/unp4k.fs/Program.cs:175`, `src/sc.gamedata/Program.cs:24-28`). If the diff touches any of them, confirm all three remain identical. A mismatch silently breaks decryption for the out-of-sync tool.
 - **SharpZipLib fork** *(Critical)*: any new `<PackageReference Include="SharpZipLib"` or `<PackageReference Include="ICSharpCode.SharpZipLib"` referencing a NuGet package instead of the local project reference. This repo uses a local fork (`src/ICSharpCode.SharpZipLib`) with SC-specific AES decryption — the NuGet package lacks it.
 - **Zstd.Net assumptions** *(Critical)*: new code that references `Zstd.Net` as if it's wired into the extraction pipeline. It's in the solution but **not currently referenced** by any executable — SC's ZSTD entries are decoded through the SharpZipLib fork.
 - **DataForge spec compliance** *(Major)*: changes to `src/unforge/DataForge.cs`, `ComplexTypes/`, or `SimpleTypes/` that diverge from the layout documented in `spec.md` at the repo root without updating the spec. The spec and code must stay in sync.
