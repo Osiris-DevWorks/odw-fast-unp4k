@@ -156,6 +156,8 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     if: (github.event_name == 'push')
     outputs:
       id: ${{ steps.create_release.outputs.id }}
@@ -184,6 +186,8 @@ jobs:
   upload:
     needs: release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     if: (github.event_name == 'push')
     strategy:
       matrix:
@@ -221,6 +225,8 @@ jobs:
   publish:
     needs: [ upload, release ]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     if: (github.event_name == 'push')
     steps:
     - name: Publish Release
