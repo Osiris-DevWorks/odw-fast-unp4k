@@ -1,12 +1,10 @@
 ---
-description: Start work on a GitHub issue — load context, open a feature branch off main, then plan and implement step-by-step with check-ins
+description: Start work on a GitHub issue — load context, grill it until ready, build it, and push one squashed commit straight to the active release/X.Y.Z
 ---
 
 # /begin_work
 
-Bootstrap a work session for a GitHub issue. Creates a feature branch off `main`, then drives the work in chunks with checkpoints between each stage so the user stays in the loop.
-
-Work through every step in order. After each step, stop at the **CHECKPOINT** and wait for the user before proceeding.
+Take a GitHub issue from idea to a squashed commit on the active `release/X.Y.Z`, following the Osiris DevWorks pipeline in `CLAUDE.md`. There is no feature PR: checks and the code review run once, on the release PR (`/pull_request`).
 
 ## Arguments
 
@@ -14,76 +12,56 @@ Work through every step in order. After each step, stop at the **CHECKPOINT** an
 
 If the argument is missing or malformed, abort with: *"/begin_work requires: <issue-url-or-#NN>"*
 
-## 1. Fetch and summarize the issue
+## 1. Load the issue
 
 ```bash
-gh issue view <NN> --json number,title,body,labels,state,url
+gh issue view <NN> --json number,title,body,labels,state,url,comments
 ```
 
-- If `state` is `closed`, warn the user.
-- Present a short summary: number, title, state, labels, and a one-paragraph summary of the body.
+Summarize it in a few lines: what is asked, which tool it touches (`unp4k`, `unp4k.fs`, `unforge` / `unforge.cli`, `sc.gamedata`, the SharpZipLib fork), and anything unclear.
 
-**CHECKPOINT — confirm the issue summary captures the work, or correct it.** Wait for the user.
+## 2. Grill it until it is ready
 
-## 2. Ensure clean main
+Ask every open question as a multiple-choice decision card (`AskUserQuestion` in the CLI, `request_decision` in a project thread) with a recommended option, never as questions in prose. A few cards at a time is fine. Typical questions: CLI flag names and defaults, output format, whether `spec.md` changes, which platforms it must work on.
 
-- Confirm the current branch is `main` or that there are no uncommitted changes. If the working tree is dirty, abort and list the offending files.
-- If not on `main`: `git checkout main`.
-- Best-effort fetch: `git fetch origin main`. If the fetch succeeds, check `git rev-list --count main..origin/main`. If > 0, warn: *"Local main is behind origin/main."* If the fetch fails (offline), warn but proceed.
+These tools have no UI, so there is normally no mockup. If the change alters console output a user reads, show the before and after text on a card.
 
-**CHECKPOINT — confirm main is ready.** Wait for the user.
+Grilling is done when Amr says it is ready. That sign-off is the approval: from here, build without plan approvals or code check-ins. Ask again only if the work hits a choice grilling did not settle.
 
-## 3. Create the feature branch
+## 3. Find the integration branch
 
-- Slug the issue title: lowercase, replace non-alphanumerics with `-`, collapse repeats, trim to ~40 chars.
-- Branch name: `feature/<NN>-<slug>` (example: `feature/5-parallel-dataforge-reads`).
-- Create it: `git checkout -b feature/<NN>-<slug>` from `main`.
+```bash
+git fetch origin
+git branch -r --list 'origin/release/*'
+```
 
-Report:
-- `Issue: #<NN> — <title>` (with URL)
-- `Feature branch: feature/<NN>-<slug>`
+Use the single open `release/X.Y.Z` (the one whose version is above `main`'s `VERSION.TXT`). If there is none, stop and tell Amr to run `/start_release` first. Work on a local branch off it (`git checkout -b work/<NN>-<slug> origin/release/X.Y.Z`); only the squashed result is pushed.
 
-**CHECKPOINT — ready to plan the work?** Wait for the user.
+## 4. Build it
 
-## 4. Plan the work
+- Follow `CLAUDE.md` and `.editorconfig` (tabs for C#).
+- If `src/unforge/` changes the binary reader, update `spec.md` in the same change.
+- If CLI arguments change, update `README.md`.
 
-Before writing any code:
+## 5. Check it
 
-1. Identify which projects this issue touches. Read the `CLAUDE.md` Architecture section to understand the layer dependencies: `ICSharpCode.SharpZipLib` -> `unforge` -> executables (`unp4k`, `unp4k.fs`, `unforge.cli`, `sc.gamedata`).
-2. Propose the implementation in **manageable chunks**. One concept at a time. For each chunk, present:
-   - What you'll change and why.
-   - The file(s) involved (with paths).
-   - Any trade-offs the user should decide on.
-   - Whether `spec.md` or `README.md` needs a corresponding update.
-   - **CHECKPOINT — wait for the user to confirm this chunk before moving to the next.**
-3. After every chunk is confirmed individually, ask the user to approve the full plan as a whole.
+- `dotnet build unp4k.sln -c Release` must succeed.
+- Run the changed tool against a real `.p4k` or `.dcb` when one is available; say plainly when it isn't.
+- Run `/standards_check` and `/docs_sync_check` on the diff and fix what they find.
 
-**CHECKPOINT — full plan approved?** Wait for the user.
+## 6. Add the test plan section
 
-## 5. Implement step-by-step
+Add a `### #NN: short name` section under `## Next release` in `docs/TEST_PLAN.md`, with concrete pass/fail items (the command to run and what should happen).
 
-Once the plan is approved:
+## 7. Push one squashed commit
 
-- Implement one chunk at a time, in the order from the plan.
-- After each chunk, show the diff for that chunk and pause.
-- **CHECKPOINT — wait for the user to confirm this chunk before moving to the next.**
-- After any chunk that touches `src/unforge/` types, verify `spec.md` consistency. After any chunk that touches CLI argument parsing, verify `README.md` consistency.
+```bash
+git checkout -B release/X.Y.Z origin/release/X.Y.Z
+git merge --squash work/<NN>-<slug>
+git commit -m "#NN: short summary" -m "Fixes #NN"
+git push origin release/X.Y.Z
+```
 
-## 6. Final walkthrough
+Use `Fixes #NN` only when the commit closes the issue (GitHub closes it when the release PR merges into `main`). Never force-push the release branch. If the push is refused because the branch moved, rebase the squashed commit onto the new tip and push again.
 
-When all chunks are implemented:
-
-1. Run `/standards_check` and `/docs_sync_check` in sequence. Walk the user through findings.
-2. Give a step-by-step walkthrough of everything that changed:
-   - Files modified, grouped by project (`SharpZipLib` / `unforge` / `unp4k` / `unp4k.fs` / `unforge.cli` / `sc.gamedata`).
-   - Why each change was made (link back to the plan chunk).
-   - Anything left intentionally untouched and why.
-3. Verify the solution builds: `dotnet build unp4k.sln -c Release`.
-
-**CHECKPOINT — ready to run `/pull_request`?** Wait for the user.
-
-## Notes
-
-- The feature branch is local-only. The user pushes when ready.
-- This command does not open a PR. `/pull_request` does.
-- If the issue requires an exploratory spike that will not ship, work on a personal branch instead.
+Report the commit link and the test plan section to Amr.
