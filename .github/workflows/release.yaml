@@ -5,16 +5,48 @@ on:
     branches:
       - main
   pull_request:
+    # The release PR, hotfix PRs and contributor PRs into main and release/**.
     branches:
       - main
+      - 'release/**'
   workflow_dispatch:
 
-env:
-  UNP4K_VERSION: 4.0.${{ github.run_number }}
-
 jobs:
+  # VERSION.TXT is the version. A push to main publishes a release only when
+  # no vX.Y.Z tag exists for it yet, so a merge that keeps the version
+  # publishes nothing.
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+      released: ${{ steps.read.outputs.released }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read VERSION.TXT
+        id: read
+        shell: bash
+        run: |
+          version=$(tr -d '[:space:]' < VERSION.TXT)
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::VERSION.TXT must be X.Y.Z, found '$version'"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            echo "v$version is already released; this run builds only."
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: version
     runs-on: ${{ matrix.runner }}
+    env:
+      UNP4K_VERSION: ${{ needs.version.outputs.version }}
 
     strategy:
       matrix:
@@ -154,11 +186,13 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: build
+    needs: [ version, build ]
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    if: (github.event_name == 'push')
+    if: github.event_name == 'push' && needs.version.outputs.released == 'false'
+    env:
+      UNP4K_VERSION: ${{ needs.version.outputs.version }}
     outputs:
       id: ${{ steps.create_release.outputs.id }}
       upload_url: ${{ steps.create_release.outputs.upload_url }}
@@ -184,11 +218,12 @@ jobs:
         prerelease: false
 
   upload:
-    needs: release
+    needs: [ version, release ]
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    if: (github.event_name == 'push')
+    env:
+      UNP4K_VERSION: ${{ needs.version.outputs.version }}
     strategy:
       matrix:
         artifact: [unp4k, unp4k-suite, unforge]
@@ -227,7 +262,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    if: (github.event_name == 'push')
     steps:
     - name: Publish Release
       uses: StuYarrow/publish-release@v1

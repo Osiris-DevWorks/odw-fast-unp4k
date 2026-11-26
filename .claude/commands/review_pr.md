@@ -34,7 +34,7 @@ Present a concise summary:
 
 - **What** — scope in plain language.
 - **Why** — linked GitHub issue summary if present; otherwise note "no linked issue."
-- **Base / head** — target branch and source branch. **Flag if base is not `main`** — PRs target `main` in this repo.
+- **Base / head** — target branch and source branch. **Flag if base is not `main` or a `release/X.Y.Z`** — the release PR and hotfix PRs target `main`; contributor PRs target the active `release/X.Y.Z`.
 - **CI status** — pass / fail / pending (from `statusCheckRollup`).
 - **Existing comments** — short summary of any prior review comments or conversation.
 - **Files changed (N)** — list each file with a one-line description of what it does.
